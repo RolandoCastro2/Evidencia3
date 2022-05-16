@@ -1,0 +1,182 @@
+from collections import namedtuple
+import datetime
+import sys
+import sqlite3
+from sqlite3 import Error
+
+Registros = namedtuple('Registro', 'fecha nombre_cliente descripcion_del_servicio descripcion_del_equipo montoCobrado cargoGenerado')
+registros = {}
+
+while True:
+    print("****MENU NAVEGABLE****")
+    print("[1] Conexion a BD y Crear Tablas")
+    print("[2] Registrar Servicio")
+    print("[3] Consultar por folio")
+    print("[4] Consultar por fecha")
+    print("[5] Consultar por rango de fechas")
+    print("[6] Salir")
+    opcion = input("Seleccione una opcion: ")
+
+    if opcion == "1":
+        while True:
+            try:
+                with sqlite3.connect("registrosServicios.db") as conexion:
+                    mi_cursor = conexion.cursor()
+                    mi_cursor.execute("CREATE TABLE IF NOT EXISTS Servicios (clave INTEGER PRIMARY KEY, fecha_registro TIMESTAMP, nombre TEXT NOT NULL);")
+                    mi_cursor.execute("CREATE TABLE IF NOT EXISTS Equipos (descripcionServicio TEXT NOT NULL, descripcionEquipo TEXT NOT NULL,Monto INTEGER NOT NULL, Cargo INTEGER NOT NULL, Servicios INTEGER NOT NULL, FOREIGN KEY(Servicios) REFERENCES Servicios(clave));")
+                    print("Tablas creada")
+            except sqlite3.Error as e:
+                print(e)
+            except:
+                print(f"Se produjo el siguiente error: {sys.exc_info()[0]}")
+            finally:
+                if (conexion):
+                    conexion.close()
+                    print("Se ha cerrado la conexión")
+            break
+
+    if opcion == "2":
+        listaServicios = []
+        listaEquipos = []
+        montosCobrados = []
+        cargosGenerados = []
+        print("REGISTRAR SERVICIO")
+        nombre_cliente = input("Nombre del cliente: ")
+
+        while True:
+            try:
+                fecha_str = input("Fecha de la venta en formato (dd/mm/aaaa): ")
+                fecha_prueba = datetime.datetime.strptime(fecha_str, "%d/%m/%Y").date()
+                fecha = datetime.datetime.combine(fecha_prueba, datetime.datetime.min.time())
+            except ValueError:
+                print("El valor de la fecha que fue proporcionado no puede ser procesado")
+                continue
+            except Exception:
+                print("Se ha presentado una excepción")
+                break
+            else:
+                while True:
+                    servicio = input("Servicio realizado: ")
+                    listaServicios.append(servicio)
+                    descripcion_del_equipo = input("Descripcion del equipo: ")
+                    listaEquipos.append(descripcion_del_equipo)
+                    montoCobrado = float(input("Monto cobrado: "))
+                    montosCobrados.append(montoCobrado)
+                    cargoGenerado = float(input("Cargo Generado: "))
+                    if cargoGenerado > 0:
+                        cargosGenerados.append(cargoGenerado)
+                    else:
+                        print("El cargo generado tiene que ser mayor a 0")
+
+                    opcion = input("¿Desea agregar otro servicio? [S] SI [N] NO: ").upper()
+                    if opcion == 'N':
+                        break
+
+                registro = Registros(fecha,nombre_cliente,listaServicios,listaEquipos,montosCobrados,cargosGenerados)
+                if registros.keys():
+                    nueva_clave = max(registros.keys()) + 1
+                else:
+                    nueva_clave = 1
+                try:
+                    with sqlite3.connect("registrosServicios.db") as conn:
+                        mi_cursor = conn.cursor()
+                        valores=(nueva_clave,fecha,nombre_cliente)
+                        valores1=(servicio,descripcion_del_equipo,montoCobrado,cargoGenerado,nueva_clave)
+                        mi_cursor.execute("INSERT INTO Servicios VALUES(?,?,?)", valores)
+                        mi_cursor.execute("INSERT INTO Equipos VALUES( ?, ?, ?, ?, ?)", valores1)
+                        print("Registro agregado exitosamente")
+                except Error as e:
+                    print (e)
+                except:
+                    print(f"Se produjo el siguiente error: {sys.exc_info()[0]}")
+                finally:
+                    if (conn):
+                        conn.close()
+
+                registros[nueva_clave] = registro
+
+                montoMasIva = sum(montosCobrados)*.16
+                montosCobrados = sum(montosCobrados) + montoMasIva + sum(cargosGenerados)
+
+                print()
+                print(f"El cliente {nombre_cliente} debe pagar un monto total con IVA incluido ${montosCobrados}")
+                print()
+                print("\nFolio\t\t\tFecha\tCliente\tServicios\tEquipos\tMontos Cobrado\tCargo Generado")
+                print("-" * 50)
+                for clave, dato in registros.items():
+                    print(f"{clave}\t{dato[0]}\t{dato[1]}\t\t{dato[2]}\t{dato[3]}\t\t{dato[4]}\t{dato[5]}")
+                    print("-" * 100)
+                    print()
+                break
+
+    if opcion == "3":
+        consulta=input("Dime el folio el cual deseas buscar: ")
+        try:
+            with sqlite3.connect("registrosServicios.db", detect_types = sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
+                mi_cursor = conn.cursor()
+                consultas = {"clave":consulta}
+                mi_cursor.execute("SELECT * FROM Servicios WHERE clave = :clave", consultas)
+                datosleer = mi_cursor.fetchall()
+
+                mi_cursor2 = conn.cursor()
+                mi_cursor2.execute("SELECT * FROM Equipos  WHERE Servicios = :clave", consultas)
+                datosleer2 = mi_cursor2.fetchall()
+
+                if datosleer:
+                    print("Clave\tNombre\t\tFecha Registro")
+
+                    for clave, fecha_registro, nombre in datosleer:
+                        print(f"{clave}\t{nombre}\t\t{fecha_registro}\n")
+
+                else:
+                    print("No se encontraron registros")
+
+                if datosleer2:
+                    print("Desc Servicio\tDesc Equipo\tMonto\tCargo\tServicios")
+
+                    for descripcionServicio, descripcionEquipo, Monto, Cargo, Servicios in datosleer2:
+                        print(f"{descripcionServicio}\t\t{descripcionEquipo}\t\t{Monto}\t{Cargo}\t{Servicios}\n")
+
+                else:
+                    print("No se encontraron registros")
+
+        except sqlite3.Error as e:
+            print (e)
+        except Exception:
+            print(f"Se produjo el siguiente error: {sys.exc_info()[0]}")
+        finally:
+            if (conn):
+                conn.close()
+
+
+    if opcion == "4":
+        _fechacon = input("Fecha de la venta en formato (dd/mm/aaaa): ")
+        _fecha_prueba = datetime.datetime.strptime(_fechacon, "%d/%m/%Y").date()
+        _fecha = datetime.datetime.combine(_fecha_prueba, datetime.datetime.min.time())
+        while True:
+            for dato in registros.values():
+                if dato[0] == _fecha:
+                    print("\nFolio\t\t\tFecha\tCliente\tServicios\tEquipos\tMontos Cobrado\tCargo Generado")
+                    print(f"{clave}\t{dato[0]}\t{dato[1]}\t\t{dato[2]}\t{dato[3]}\t\t{dato[4]}\t{dato[5]}")
+                    print("-" * 100)
+            break
+
+    if opcion =="5":
+        fecha1 = input("Ingrese la primer fecha: (dd/mm/aaaa) ")
+        _fecha_prueba1 = datetime.datetime.strptime(fecha1, "%d/%m/%Y").date()
+        _fecha1 = datetime.datetime.combine(_fecha_prueba1, datetime.datetime.min.time())
+
+        fecha2 = input("Ingrese la segunda fecha: (aaaa-mm-dd) ")
+        _fecha_prueba2 = datetime.datetime.strptime(fecha2, "%d/%m/%Y").date()
+        _fecha2 = datetime.datetime.combine(_fecha_prueba2, datetime.datetime.min.time())
+
+        while True:
+            for dato in registros.values():
+                if dato[0]>=_fecha1 and dato[0]<=_fecha2:
+                    print("\nFolio\t\t\tFecha\tCliente\tServicios\tEquipos\tMontos Cobrado\tCargo Generado")
+                    print(f"{clave}\t{dato[0]}\t{dato[1]}\t\t{dato[2]}\t{dato[3]}\t\t{dato[4]}\t{dato[5]}")
+                    print("-" * 100)
+            break
+
+    if opcion == "6":
+        break
